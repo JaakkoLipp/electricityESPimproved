@@ -40,6 +40,9 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 const char* priceApiUrl = "https://api.spot-hinta.fi/Today";
 
+// discord ping
+const bool pingUserOnAlert = true;
+
 const double transferprice = 5.0; // Transfer and/or additional costs in eurocents
 const int offset = 3;             // Offset in pixels for price chart
 const double alertThreshold = 20.0; // Alert threshold in c/kWh (same value shown on display)
@@ -488,31 +491,31 @@ PriceData fetchData() {
 
 bool sendDiscordWebhook(const String& message) {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Discord webhook skipped: WiFi not connected");
+    Serial.println("Webhook skipped: WiFi not connected");
     return false;
   }
-
-  WiFiClientSecure client;
-  client.setInsecure();
 
   HTTPClient http;
-  if (!http.begin(client, discordWebhookUrl)) {
-    Serial.println("Discord webhook setup failed");
-    return false;
-  }
-
+  http.begin(discordWebhookUrl);
   http.addHeader("Content-Type", "application/json");
 
   JsonDocument doc;
   doc["content"] = message;
 
+  // Only allow the specific user mention if pinging is enabled
+  JsonArray parse = doc["allowed_mentions"]["parse"].to<JsonArray>();
+  if (pingUserOnAlert) {
+    JsonArray users = doc["allowed_mentions"]["users"].to<JsonArray>();
+    users.add(discordUserIdToPing);
+  }
+
   String payload;
   serializeJson(doc, payload);
 
   int httpResponseCode = http.POST(payload);
-  Serial.printf("Discord webhook response: %d\n", httpResponseCode);
-  http.end();
+  Serial.printf("Webhook response: %d\n", httpResponseCode);
 
+  http.end();
   return httpResponseCode >= 200 && httpResponseCode < 300;
 }
 
@@ -539,7 +542,11 @@ void checkAndSendPriceAlert(const PriceData& data, int hour, int minute) {
     return;
   }
 
-  String msg = "⚠ Electricity price alert\n";
+  String msg = "";
+  if (pingUserOnAlert) {
+    msg += "<@" + String(discordUserIdToPing) + "> ";
+  }
+  msg += "⚠️ Electricity price alert\n";
   msg += "Current price: " + String(curprice, 1) + " c/kWh\n";
   msg += "Threshold: " + String(alertThreshold, 1) + " c/kWh\n";
   msg += "Time: ";
